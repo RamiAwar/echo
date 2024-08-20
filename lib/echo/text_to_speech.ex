@@ -3,31 +3,46 @@ defmodule Echo.TextToSpeech do
   Generic TTS module.
   """
   alias Echo.Client.ElevenLabs
+  require Logger
 
   @separators [".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " "]
-  @max_retries 3
-  @retry_delay 1000
+
+  defmodule Error do
+    defexception [:message, :reason]
+
+    @type t :: %__MODULE__{
+            message: String.t(),
+            reason: :connection_closed | :send_failed | :flush_failed | any()
+          }
+  end
 
   @doc """
   Consumes an Enumerable (such as a stream) of text
   into speech, applying `fun` to each audio element.
 
   Returns the spoken text contained within `enumerable`.
+
+  Raises `Echo.TextToSpeech.Error` if an error occurs during streaming.
   """
+  @spec stream(Enumerable.t(), pid()) :: String.t() | no_return()
   def stream(enumerable, pid) do
     result =
       enumerable
       |> group_tokens()
       |> Stream.map(fn text ->
         text = IO.iodata_to_binary(text)
-        send_with_retry(pid, text)
-        text
+
+        case send_text(pid, text) do
+          :ok -> text
+          {:error, reason} -> raise Error, message: "WebSocket send failed", reason: reason
+        end
       end)
       |> Enum.join()
 
-    flush_with_retry(pid)
-
-    result
+    case flush_websocket(pid) do
+      :ok -> result
+      {:error, reason} -> raise Error, message: "WebSocket flush failed", reason: reason
+    end
   end
 
   defp group_tokens(stream) do
@@ -42,48 +57,28 @@ defmodule Echo.TextToSpeech do
     end)
   end
 
-  defp send_with_retry(pid, text, retries \\ 0)
-
-  defp send_with_retry(_pid, _text, retries) when retries >= @max_retries do
-    Logger.error("Max retries reached. Unable to send text.")
-    {:error, :max_retries_reached}
-  end
-
-  defp send_with_retry(pid, text, retries) do
+  defp send_text(pid, text) do
     case ElevenLabs.WebSocket.send(pid, text) do
       :ok ->
         :ok
 
       {:error, :not_alive} ->
-        Logger.warn("WebSocket not alive. Retrying in #{@retry_delay}ms...")
-        Process.sleep(@retry_delay)
-        send_with_retry(pid, text, retries + 1)
+        Logger.error("WebSocket connection is closed.")
+        {:error, :connection_closed}
 
-      error ->
-        Logger.error("Unexpected error: #{inspect(error)}")
-        {:error, error}
+      {:error, reason} ->
+        Logger.error("Failed to send text: #{inspect(reason)}")
+        {:error, :send_failed}
     end
   end
 
-  defp flush_with_retry(pid, retries \\ 0)
-
-  defp flush_with_retry(_pid, retries) when retries >= @max_retries do
-    Logger.error("Max retries reached. Unable to flush.")
-    {:error, :max_retries_reached}
-  end
-
-  defp flush_with_retry(pid, retries) do
+  defp flush_websocket(pid) do
     try do
       ElevenLabs.WebSocket.flush(pid)
-      :ok
     rescue
-      error ->
-        Logger.warn(
-          "Error flushing WebSocket: #{inspect(error)}. Retrying in #{@retry_delay}ms..."
-        )
-
-        Process.sleep(@retry_delay)
-        flush_with_retry(pid, retries + 1)
+      e ->
+        Logger.error("Failed to flush WebSocket: #{inspect(e)}")
+        {:error, :flush_failed}
     end
   end
 end
