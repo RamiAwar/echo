@@ -17,63 +17,76 @@ import Config
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
 
-case System.get_env("TEXT_GENERATION_PROVIDER") do
+# LLM
+provider = System.get_env("TEXT_GENERATION_PROVIDER") || "openai"
+
+case provider do
   "openai" ->
+    openai_api_key = System.fetch_env!("OPENAI_API_KEY")
+    openai_model = System.fetch_env!("TEXT_GENERATION_MODEL")
+    openai_max_tokens = System.get_env("TEXT_GENERATION_MAX_NEW_TOKENS", 400)
+
     config :openai,
-      api_key:
-        System.get_env("OPENAI_API_KEY") ||
-          raise("OPENAI_API_KEY required when provider is OpenAI",
-            http_options: [recv_timeout: :infinity, async: :once]
-          )
+      api_key: openai_api_key,
+      http_options: [recv_timeout: :infinity, async: :once]
 
     config :echo, Echo.TextGeneration, provider: Echo.TextGeneration.OpenAI
 
     config :echo, Echo.TextGeneration.OpenAI,
-      model:
-        System.get_env("TEXT_GENERATION_MODEL") ||
-          raise("TEXT_GENERATION_MODEL is required",
-            max_tokens: System.get_env("TEXT_GENERATION_MAX_NEW_TOKENS") || 400
-          )
+      model: openai_model,
+      max_tokens: openai_max_tokens
 
   "generic" ->
+    generic_api_url = System.fetch_env!("TEXT_GENERATION_API_URL")
+    generic_model = System.fetch_env!("TEXT_GENERATION_MODEL")
+    generic_max_tokens = System.get_env("TEXT_GENERATION_MAX_NEW_TOKENS", 400)
+
     config :echo, Echo.TextGeneration, provider: Echo.TextGeneration.OpenAI
 
     config :openai,
-      api_url:
-        System.get_env("TEXT_GENERATION_API_URL") ||
-          raise("TEXT_GENERATION_API_URL is required when provider is generic",
-            http_options: [recv_timeout: :infinity, async: :once]
-          )
+      api_url: generic_api_url,
+      http_options: [recv_timeout: :infinity, async: :once]
 
     config :echo, Echo.TextGeneration.OpenAI,
-      model: System.get_env("TEXT_GENERATION_MODEL") || "gpt-3.5-turbo",
-      max_tokens: System.get_env("TEXT_GENERATION_MAX_NEW_TOKENS") || 400
+      model: generic_model,
+      max_tokens: generic_max_tokens
 
   "bumblebee" ->
+    bb_text_generation_model = System.fetch_env!("TEXT_GENERATION_MODEL")
+    bb_max_new_tokens = System.get_env("TEXT_GENERATION_MAX_NEW_TOKENS", 400)
+    bb_max_sequence_length = System.get_env("TEXT_GENERATION_MAX_SEQUENCE_LENGTH", 2048)
+
     config :echo, Echo.TextGeneration, provider: Echo.TextGeneration.Bumblebee
 
     config :echo, Echo.TextGeneration.Bumblebee,
-      repo:
-        System.get_env("TEXT_GENERATION_MODEL") ||
-          "TEXT_GENERATION_MODEL is required when provider is bumblebee",
-      max_new_tokens: System.get_env("TEXT_GENERATION_MAX_NEW_TOKENS") || 400,
-      max_sequence_length: System.get_env("TEXT_GENERATION_MAX_SEQUENCE_LENGTH") || 2048
+      repo: bb_text_generation_model,
+      max_new_tokens: bb_max_new_tokens,
+      max_sequence_length: bb_max_sequence_length
 end
 
-config :echo, Echo.SpeechToText.Bumblebee,
-  repo:
-    System.get_env("SPEECH_TO_TEXT_MODEL_REPO") ||
-      "SPEECH_TO_TEXT_MODEL_REPO is required when provider is bumblebee"
+# Speech-to-Text
+stt_model_repo = System.fetch_env!("SPEECH_TO_TEXT_MODEL_REPO")
+
+config :echo, Echo.SpeechToText.Bumblebee, repo: stt_model_repo
+
+# Text-to-Speech
+eleven_labs_api_key = System.fetch_env!("ELEVEN_LABS_API_KEY")
+eleven_labs_voice_id = System.get_env("ELEVEN_LABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+eleven_labs_model_id = System.get_env("ELEVEN_LABS_MODEL_ID", "eleven_turbo_v2")
+
+eleven_labs_optimize_streaming_latency =
+  System.get_env("ELEVEN_LABS_OPTIMIZE_STREAMING_LATENCY", 2)
+
+eleven_labs_output_format = System.get_env("ELEVEN_LABS_OUTPUT_FORMAT", "mp3_22050_32")
 
 config :echo, Echo.Client.ElevenLabs.WebSocket,
-  api_key:
-    System.get_env("ELEVEN_LABS_API_KEY") ||
-      raise("ELEVEN_LABS_API_KEY is required when provider is eleven_labs",
-        voice_id: System.get_env("ELEVEN_LABS_VOICE_ID") || "21m00Tcm4TlvDq8ikWAM",
-        model_id: System.get_env("ELEVEN_LABS_MODEL_ID") || "eleven_turbo_v2",
-        optimize_streaming_latency: System.get_env("ELEVEN_LABS_OPTIMIZE_STREAMING_LATENCY") || 2,
-        output_format: System.get_env("ELEVEN_LABS_OUTPUT_FORMAT") || "mp3_22050_32"
-      )
+  api_key: eleven_labs_api_key,
+  voice_id: eleven_labs_voice_id,
+  model_id: eleven_labs_model_id,
+  optimize_streaming_latency: eleven_labs_optimize_streaming_latency,
+  output_format: eleven_labs_output_format
+
+# Regular Config
 
 config :nx, default_backend: EXLA.Backend
 
